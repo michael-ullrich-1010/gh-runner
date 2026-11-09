@@ -1,0 +1,21 @@
+# Manueller Smoke-Test der Auswahl-Logik. In diesem Repo selbst gibt es keine
+# lokalen Runner – erwartet wird daher immer der Fallback.
+name: self-test
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  pick:
+    uses: ./.github/workflows/pick-runner.yml
+
+  show:
+    needs: pick
+    runs-on: ${{ fromJSON(needs.pick.outputs.runner) }}
+    steps:
+      - shell: pwsh
+        run: |
+          Write-Host "runner=${{ needs.pick.outputs.runner }}"
+          Write-Host "is-self-hosted=${{ needs.pick.outputs.is-self-hosted }}"

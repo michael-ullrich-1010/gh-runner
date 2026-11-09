@@ -36,6 +36,51 @@ Jeder Runner erhält zusätzlich den Rechnernamen als Label.
 runs-on: [self-hosted, windows, z8]
 ```
 
+## Lokal zuerst, sonst GitHub-hosted (Fallback)
+
+GitHub kennt keinen eingebauten Fallback: Ein Job mit `runs-on: [self-hosted, …]` wartet sonst bis
+zu 24 h auf einen Runner. Der wiederverwendbare Workflow
+[`pick-runner.yml`](.github/workflows/pick-runner.yml) prüft deshalb vorab per API, ob ein passender
+lokaler Runner **online und frei** ist, und liefert das passende `runs-on`.
+
+Vollständiges Beispiel: [`examples/ci-with-fallback.yml`](examples/ci-with-fallback.yml)
+
+```yaml
+jobs:
+  pick:
+    uses: michael-ullrich-1010/gh-runner/.github/workflows/pick-runner.yml@v1
+    secrets:
+      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+  build:
+    needs: pick
+    runs-on: ${{ fromJSON(needs.pick.outputs.runner) }}
+```
+
+| Input | Bedeutung | Default |
+|---|---|---|
+| `self-hosted-labels` | JSON-Array, alle Labels müssen am Runner vorhanden sein | `["self-hosted","windows","z8"]` |
+| `fallback` | GitHub-hosted Runner | `windows-latest` |
+| `org` | Org, deren Runner geprüft werden | Owner des aufrufenden Repos |
+
+**Einmalig pro Org:** Fine-grained PAT mit *Organization → Self-hosted runners: Read-only* erstellen
+(Browser) und als Org-Secret hinterlegen:
+
+```powershell
+gh secret set RUNNER_STATUS_TOKEN --org <org> --visibility private
+```
+
+Der Fallback greift automatisch, wenn …
+- das aufrufende Repo **öffentlich** ist (lokale Runner nie für öffentliche Repos),
+- das Secret fehlt (z. B. bei PRs aus Forks) oder die API-Abfrage fehlschlägt,
+- kein passender Runner online **und** frei ist.
+
+Grenzen: Zwischen Prüfung und Jobstart kann der Runner belegt werden – dann wartet der Job. Der
+Vorab-Job kostet pro Lauf einige Sekunden GitHub-hosted Minuten. Der Build muss auf beiden Runnern
+laufen (Toolchain im Workflow installieren, z. B. `actions/setup-node`).
+
+> Reusable Workflows aus einem **privaten** Repo sind nur für Repos desselben Owners nutzbar.
+> Für Repos anderer Orgs muss dieses Repo **öffentlich** sein.
+
 ## Entfernen (z. B. vor dem Ausmustern des Rechners)
 
 ```powershell

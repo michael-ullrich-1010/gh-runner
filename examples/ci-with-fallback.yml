@@ -1,0 +1,37 @@
+# Beispiel: in ein anderes Repo nach .github/workflows/ci.yml kopieren.
+# Läuft auf dem lokalen Runner (z8), wenn er frei ist – sonst auf windows-latest.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pick:
+    uses: michael-ullrich-1010/gh-runner/.github/workflows/pick-runner.yml@v1
+    with:
+      self-hosted-labels: '["self-hosted","windows","z8"]'
+      fallback: windows-latest
+    secrets:
+      RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+
+  build:
+    needs: pick
+    runs-on: ${{ fromJSON(needs.pick.outputs.runner) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Toolchain immer im Workflow installieren – dann läuft es auf beiden Runnern gleich
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Wo laufe ich?
+        shell: pwsh
+        run: |
+          Write-Host "Runner: ${{ runner.name }}"
+          Write-Host "Self-hosted: ${{ needs.pick.outputs.is-self-hosted }}"
+
+      - run: npm ci
+      - run: npm test

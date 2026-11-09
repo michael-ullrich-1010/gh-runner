@@ -1,0 +1,81 @@
+# Wiederverwendbarer Workflow: wählt den lokalen self-hosted Runner, wenn einer
+# online und frei ist – sonst den GitHub-hosted Fallback.
+#
+# Aufruf siehe examples/ci-with-fallback.yml
+name: pick-runner
+
+on:
+  workflow_call:
+    inputs:
+      self-hosted-labels:
+        description: JSON-Array der Labels, die der lokale Runner haben muss
+        type: string
+        default: '["self-hosted","windows","z8"]'
+      fallback:
+        description: GitHub-hosted Runner, falls kein lokaler frei ist
+        type: string
+        default: windows-latest
+      org:
+        description: Org, deren Runner geprüft werden (Default = Owner des aufrufenden Repos)
+        type: string
+        default: ''
+    secrets:
+      RUNNER_STATUS_TOKEN:
+        description: 'Fine-grained PAT mit "Self-hosted runners: Read-only" auf der Org'
+        required: false
+    outputs:
+      runner:
+        description: JSON-Wert für runs-on (mit fromJSON verwenden)
+        value: ${{ jobs.pick.outputs.runner }}
+      is-self-hosted:
+        description: '"true" wenn der lokale Runner gewählt wurde'
+        value: ${{ jobs.pick.outputs.is-self-hosted }}
+
+permissions: {}
+
+jobs:
+  pick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      runner: ${{ steps.pick.outputs.runner }}
+      is-self-hosted: ${{ steps.pick.outputs.is-self-hosted }}
+    steps:
+      - id: pick
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+          ORG: ${{ inputs.org || github.repository_owner }}
+          LABELS: ${{ inputs.self-hosted-labels }}
+          FALLBACK: ${{ inputs.fallback }}
+          IS_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -uo pipefail
+
+          use_fallback() {
+            echo "runner=$(jq -cn --arg r "$FALLBACK" '$r')" >> "$GITHUB_OUTPUT"
+            echo "is-self-hosted=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=pick-runner::$FALLBACK ($1)"
+            exit 0
+          }
+
+          # Lokale Runner nie für öffentliche Repos verwenden
+          [ "$IS_PRIVATE" = "true" ] || use_fallback "Repo ist nicht privat"
+          [ -n "$GH_TOKEN" ]         || use_fallback "kein RUNNER_STATUS_TOKEN"
+          want=$(jq -c . <<< "$LABELS") || use_fallback "self-hosted-labels ist kein JSON-Array"
+
+          if ! runners=$(gh api "orgs/$ORG/actions/runners" --paginate); then
+            use_fallback "Runner-Status nicht abfragbar"
+          fi
+
+          free=$(jq -r --argjson want "$want" '
+            .runners[]
+            | select(.status == "online" and (.busy | not))
+            | select(($want - [.labels[].name]) | length == 0)
+            | .name' <<< "$runners")
+
+          [ -n "$free" ] || use_fallback "kein lokaler Runner online und frei"
+
+          echo "runner=$want" >> "$GITHUB_OUTPUT"
+          echo "is-self-hosted=true" >> "$GITHUB_OUTPUT"
+          echo "::notice title=pick-runner::self-hosted $want (frei: $(echo $free | tr '\n' ' '))"
