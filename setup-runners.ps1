@@ -35,7 +35,7 @@ git config --system core.longpaths true
 # 2) Einziger Login (Browser), Scope admin:org für Runner-Registrierung
 $st = Invoke-Native { gh auth status }
 if ($LASTEXITCODE -ne 0 -or $st -notmatch "Logged in") {
-  gh auth login --hostname github.com --web --scopes admin:org; Assert-Ok "gh auth login"
+  gh auth login --hostname github.com --git-protocol https --web --scopes admin:org; Assert-Ok "gh auth login"
 } elseif ($st -notmatch "admin:org") {
   gh auth refresh --hostname github.com --scopes admin:org; Assert-Ok "gh auth refresh"
 }
