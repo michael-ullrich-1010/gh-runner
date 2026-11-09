@@ -21,6 +21,21 @@ function Invoke-Native([scriptblock]$Cmd) {
   $old = $ErrorActionPreference; $ErrorActionPreference = "Continue"
   try { (& $Cmd 2>&1 | ForEach-Object { "$_" }) -join "`n" } finally { $ErrorActionPreference = $old }
 }
+# Dienstkonto sprachneutral setzen und Service starten. Hintergrund: Auf deutschem
+# Windows trägt config.cmd "NT-AUTORITÄT\Netzwerkdienst" ein und der Start scheitert
+# mit Fehler 1068. "NT AUTHORITY\NetworkService" funktioniert in jeder Sprache.
+function Start-RunnerService([string]$Dir) {
+  $svcFile = Join-Path $Dir ".service"
+  if (-not (Test-Path $svcFile)) { throw "In $Dir ist kein Service installiert" }
+  $svcName = (Get-Content $svcFile -Raw).Trim()
+  $s = Get-CimInstance Win32_Service -Filter "Name='$svcName'"
+  if (-not $s) { throw "Service $svcName nicht gefunden" }
+  $rv = ($s | Invoke-CimMethod -MethodName Change -Arguments @{
+          StartName = 'NT AUTHORITY\NetworkService'; StartPassword = '' }).ReturnValue
+  if ($rv -ne 0) { throw "Dienstkonto für $svcName nicht änderbar (Code $rv)" }
+  if ((Get-Service $svcName).Status -ne 'Running') { Start-Service $svcName }
+  Write-Host "Läuft: $svcName"
+}
 function Assert-Ok([string]$What) {
   if ($LASTEXITCODE -ne 0) { throw "$What fehlgeschlagen (Exit-Code $LASTEXITCODE)" }
 }
@@ -55,7 +70,11 @@ foreach ($org in $Orgs) {
   for ($i = 1; $i -le $Count; $i++) {
     $name = "$env:COMPUTERNAME-$org-$i".ToLower()
     $dir  = Join-Path $Root "$org-$i"
-    if (Test-Path "$dir\.runner") { Write-Host "$name existiert, übersprungen"; continue }
+    if (Test-Path "$dir\.runner") {
+      Write-Host "$name ist schon registriert"
+      Start-RunnerService $dir
+      continue
+    }
 
     New-Item -ItemType Directory -Force $dir | Out-Null
     Expand-Archive $zip.FullName -DestinationPath $dir -Force
@@ -65,7 +84,11 @@ foreach ($org in $Orgs) {
       --work _work --runasservice --replace
     $rc = $LASTEXITCODE
     Pop-Location
-    if ($rc -ne 0) { throw "config.cmd für $name fehlgeschlagen (Exit-Code $rc)" }
+    # config.cmd meldet Exit-Code 1, wenn nur der Service-Start scheitert (deutsches
+    # Windows). Entscheidend ist, ob Registrierung und Service angelegt wurden.
+    if (-not (Test-Path "$dir\.service")) { throw "config.cmd für $name fehlgeschlagen (Exit-Code $rc)" }
+    if ($rc -ne 0) { Write-Host "Service-Start durch config.cmd fehlgeschlagen, korrigiere Dienstkonto ..." }
+    Start-RunnerService $dir
     Write-Host "OK: $name"
   }
 }

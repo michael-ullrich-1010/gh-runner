@@ -19,7 +19,17 @@ Keine GitHub App, kein PAT, kein Docker.
 4. Browser öffnet sich → bei GitHub anmelden und bestätigen.
 5. Prüfen: *Org → Settings → Actions → Runners* → Runner stehen auf **Idle**.
 
-Das Skript ist idempotent: Bereits vorhandene Runner werden übersprungen.
+Das Skript ist idempotent: Bereits registrierte Runner werden nicht neu angelegt, ein gestoppter
+Service wird aber gestartet.
+
+> **Deutsches Windows:** `config.cmd` trägt dort `NT-AUTORITÄT\Netzwerkdienst` als Dienstkonto ein,
+> der Service startet dann nicht (Fehler 1068, *„Abhängigkeitsdienst konnte nicht gestartet werden“*).
+> Das Skript setzt deshalb immer das sprachneutrale `NT AUTHORITY\NetworkService`. Von Hand:
+>
+> ```powershell
+> Get-CimInstance Win32_Service -Filter "Name='<service>'" |
+>   Invoke-CimMethod -MethodName Change -Arguments @{ StartName='NT AUTHORITY\NetworkService'; StartPassword='' }
+> ```
 
 | Parameter | Bedeutung | Default |
 |---|---|---|
